@@ -7,7 +7,7 @@ import pytz
 import pandas as pd
 
 TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
-ALLOWED_USERS = [7863509137]
+ALLOWED_USERS = [7863509137, 658712542]
 REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
 
 logging.basicConfig(level=logging.INFO)
