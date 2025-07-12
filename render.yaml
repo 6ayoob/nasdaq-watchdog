@@ -3,5 +3,5 @@ services:
     name: nasdaq-watchdog
     env: python
     plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
+    buildCommand: ""
+    startCommand: python main.py
