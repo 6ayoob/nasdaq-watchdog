@@ -1,3 +1,4 @@
+
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -7,12 +8,10 @@ import pytz
 import asyncio
 import pandas as pd
 
-# إعدادات البوت
 TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
-ALLOWED_USERS = [7863509137, 658712542]
-REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
+ALLOWED_USERS = [7863509137]
+REPORT_TIME_HOUR = 15  # 3 مساءً بتوقيت السعودية
 
-# إعدادات اللوق
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -31,46 +30,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def scan_stocks():
     symbols = load_symbols()
-    good_stocks = []
-
-    for symbol in symbols:
-        try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(period="3mo")
-            if df.empty or len(df) < 50:
-                continue
-
-            df["50ma"] = df["Close"].rolling(window=50).mean()
-            df["50vol"] = df["Volume"].rolling(window=50).mean()
-            latest = df.iloc[-1]
-
-            if (
-                latest["Close"] < 20 and
-                latest["Close"] > latest["50ma"] and
-                latest["Volume"] > latest["50vol"]
-            ):
-                name = ticker.info.get("shortName", symbol)
-                good_stocks.append(f"📈 {name} ({symbol})\nالسعر: ${latest['Close']:.2f}")
-
-        except Exception:
-            continue
-
-    if not good_stocks:
-        return "❌ لم يتم العثور على أسهم مطابقة للشروط."
-    return "\n\n".join(good_stocks[:20])  # عرض 20 سهم بدل 10
-
-def scan_stocks():
-    import yfinance as yf
-    import pandas as pd
-
-    symbols = load_symbols()
     if not symbols:
         return "⚠️ لم يتم العثور على رموز أسهم."
 
     try:
-        # تحميل البيانات دفعة واحدة لجميع الرموز
         df = yf.download(
-            tickers=symbols,
+            tickers=" ".join(symbols),
             period="3mo",
             interval="1d",
             group_by="ticker",
@@ -82,7 +47,6 @@ def scan_stocks():
         return f"❌ حدث خطأ أثناء تحميل البيانات: {e}"
 
     good_stocks = []
-
     for symbol in symbols:
         try:
             data = df[symbol]
@@ -98,37 +62,46 @@ def scan_stocks():
                 latest["Close"] > latest["50ma"] and
                 latest["Volume"] > latest["50vol"]
             ):
-                good_stocks.append(f"📈 {symbol}\nالسعر: ${latest['Close']:.2f}")
-
+                good_stocks.append(f"📈 {symbol}
+السعر: ${latest['Close']:.2f}")
         except Exception:
             continue
 
     if not good_stocks:
         return "❌ لم يتم العثور على أسهم مطابقة للشروط."
-    return "\n\n".join(good_stocks[:20])  # يمكنك تعديل العدد هنا
+    return "\n\n".join(good_stocks[:20])
 
-# ✅ مهمة التقرير اليومي التلقائي
+async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
+        return
+
+    await update.message.reply_text("🔍 جاري فحص السوق...")
+    result = await asyncio.to_thread(scan_stocks)
+    await update.message.reply_text(result)
+
 async def daily_report(app):
     while True:
         now = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
         if now.hour == REPORT_TIME_HOUR and now.minute == 0:
-            logger.info("🚀 إرسال التقرير التلقائي...")
             result = await asyncio.to_thread(scan_stocks)
             for user_id in ALLOWED_USERS:
                 try:
                     await app.bot.send_message(chat_id=user_id, text="📊 تقرير السوق اليومي:\n\n" + result)
                 except Exception as e:
                     logger.error(f"فشل في إرسال التقرير إلى {user_id}: {e}")
-            await asyncio.sleep(60)  # انتظر دقيقة حتى لا يكرر الإرسال
+            await asyncio.sleep(60)
         await asyncio.sleep(30)
 
-# ✅ تشغيل البوت مع المهمة التلقائية
 async def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("scan", scan_command))
-    asyncio.create_task(daily_report(app))
+
+    app.create_task(daily_report(app))
     await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
