@@ -4,23 +4,24 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import yfinance as yf
 import datetime
 import pytz
-import asyncio
 import pandas as pd
+import asyncio
 
-# إعدادات البوت
+# بيانات البوت
 TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
-ALLOWED_USERS = [7863509137, 658712542]  # ← أضفنا معرفك هنا
+ALLOWED_USERS = [7863509137, 658712542]
 REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
 
+# إعداد السجل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# تحميل قائمة الأسهم
+# تحميل قائمة الرموز من الملف
 def load_symbols():
     with open("nasdaq_symbols.txt", "r") as f:
-        return [line.strip().upper() for line in f.readlines() if line.strip()]
+        return [line.strip().upper() for line in f if line.strip()]
 
-# التحقق من السماح
+# التحقق من المستخدم
 def is_allowed(user_id):
     return user_id in ALLOWED_USERS
 
@@ -31,82 +32,72 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("✅ أهلاً بك! أرسل /scan للحصول على أفضل الأسهم.")
 
-# فحص الأسهم
+# الفحص
 def scan_stocks():
     symbols = load_symbols()
-    if not symbols:
-        return "⚠️ لم يتم العثور على رموز أسهم."
-
-    try:
-        df = yf.download(
-            tickers=" ".join(symbols),
-            period="3mo",
-            interval="1d",
-            group_by="ticker",
-            threads=True,
-            auto_adjust=True,
-            progress=False
-        )
-    except Exception as e:
-        return f"❌ حدث خطأ أثناء تحميل البيانات: {e}"
-
     good_stocks = []
+
     for symbol in symbols:
         try:
-            data = df[symbol]
-            if data.empty or len(data) < 50:
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period="3mo")
+            if df.empty or len(df) < 50:
                 continue
 
-            data["50ma"] = data["Close"].rolling(window=50).mean()
-            data["50vol"] = data["Volume"].rolling(window=50).mean()
-            latest = data.iloc[-1]
+            df["50ma"] = df["Close"].rolling(window=50).mean()
+            df["50vol"] = df["Volume"].rolling(window=50).mean()
+            latest = df.iloc[-1]
 
             if (
                 latest["Close"] < 20 and
                 latest["Close"] > latest["50ma"] and
                 latest["Volume"] > latest["50vol"]
             ):
-                good_stocks.append(f"📈 {symbol}\nالسعر: ${latest['Close']:.2f}")
+                name = ticker.info.get("shortName", symbol)
+                good_stocks.append(f"📈 {name} ({symbol})\nالسعر: ${latest['Close']:.2f}")
         except Exception:
             continue
 
     if not good_stocks:
         return "❌ لم يتم العثور على أسهم مطابقة للشروط."
-    return "\n\n".join(good_stocks[:20])
+    return "\n\n".join(good_stocks[:10])
 
 # أمر /scan
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
         return
-
-    await update.message.reply_text("🔍 جاري فحص السوق...")
+    await update.message.reply_text("🔍 يتم الآن فحص السوق، الرجاء الانتظار...")
     result = await asyncio.to_thread(scan_stocks)
     await update.message.reply_text(result)
 
-# تقرير يومي تلقائي
-async def daily_report(app):
+# المهمة المجدولة للتقرير اليومي
+async def scheduled_report(app):
     while True:
         now = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
         if now.hour == REPORT_TIME_HOUR and now.minute == 0:
             result = await asyncio.to_thread(scan_stocks)
             for user_id in ALLOWED_USERS:
                 try:
-                    await app.bot.send_message(chat_id=user_id, text="📊 تقرير السوق اليومي:\n\n" + result)
+                    await app.bot.send_message(chat_id=user_id, text=result)
                 except Exception as e:
-                    logger.error(f"فشل في إرسال التقرير إلى {user_id}: {e}")
-            await asyncio.sleep(60)
+                    logger.error(f"خطأ عند إرسال التقرير إلى {user_id}: {e}")
+            await asyncio.sleep(60)  # انتظر دقيقة حتى لا تتكرر الإرسال
         await asyncio.sleep(30)
 
-# التشغيل الرئيسي
+# بدء التطبيق
 async def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("scan", scan_command))
-
-    app.create_task(daily_report(app))
+    asyncio.create_task(scheduled_report(app))
     await app.run_polling()
 
+# معالجة مشكلة event loop في Render
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.get_event_loop().run_until_complete(main())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
