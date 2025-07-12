@@ -1,4 +1,3 @@
-
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -8,26 +7,31 @@ import pytz
 import asyncio
 import pandas as pd
 
+# إعدادات البوت
 TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
-ALLOWED_USERS = [7863509137]
-REPORT_TIME_HOUR = 15  # 3 مساءً بتوقيت السعودية
+ALLOWED_USERS = [7863509137, 658712542]  # ← أضفنا معرفك هنا
+REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# تحميل قائمة الأسهم
 def load_symbols():
     with open("nasdaq_symbols.txt", "r") as f:
         return [line.strip().upper() for line in f.readlines() if line.strip()]
 
+# التحقق من السماح
 def is_allowed(user_id):
     return user_id in ALLOWED_USERS
 
+# أمر /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
         return
     await update.message.reply_text("✅ أهلاً بك! أرسل /scan للحصول على أفضل الأسهم.")
 
+# فحص الأسهم
 def scan_stocks():
     symbols = load_symbols()
     if not symbols:
@@ -62,8 +66,7 @@ def scan_stocks():
                 latest["Close"] > latest["50ma"] and
                 latest["Volume"] > latest["50vol"]
             ):
-                good_stocks.append(f"📈 {symbol}
-السعر: ${latest['Close']:.2f}")
+                good_stocks.append(f"📈 {symbol}\nالسعر: ${latest['Close']:.2f}")
         except Exception:
             continue
 
@@ -71,6 +74,7 @@ def scan_stocks():
         return "❌ لم يتم العثور على أسهم مطابقة للشروط."
     return "\n\n".join(good_stocks[:20])
 
+# أمر /scan
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
@@ -80,6 +84,7 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = await asyncio.to_thread(scan_stocks)
     await update.message.reply_text(result)
 
+# تقرير يومي تلقائي
 async def daily_report(app):
     while True:
         now = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
@@ -93,6 +98,7 @@ async def daily_report(app):
             await asyncio.sleep(60)
         await asyncio.sleep(30)
 
+# التشغيل الرئيسي
 async def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -104,4 +110,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
