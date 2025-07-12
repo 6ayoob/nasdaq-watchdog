@@ -7,7 +7,7 @@ import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 
-# التوكن والمعرفات
+# إعدادات البوت
 BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
 ALLOWED_IDS = [7863509137, 658712542]
 
@@ -15,7 +15,6 @@ ALLOWED_IDS = [7863509137, 658712542]
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# دالة تحميل الأسهم من الملف
 def load_symbols():
     try:
         with open("nasdaq_symbols.txt", "r") as f:
@@ -23,7 +22,6 @@ def load_symbols():
     except FileNotFoundError:
         return []
 
-# دالة فحص الأسهم
 def scan_stocks():
     symbols = load_symbols()
     results = []
@@ -41,46 +39,40 @@ def scan_stocks():
 
             if latest["Close"] < 20 and latest["Close"] > df["50ma"].iloc[-1] and latest["Volume"] > df["50vol"].iloc[-1]:
                 results.append((symbol, latest["Close"], latest["Volume"]))
-        except Exception as e:
+        except Exception:
             continue
 
     if not results:
-        return ["❌ لا توجد نتائج حالياً."]
+        return ["❌ لا توجد نتائج."]
     
     results.sort(key=lambda x: x[2], reverse=True)
-    return [f"{s} - ${c:.2f} - حجم: {int(v):,}" for s, c, v in results[:10]]
+    return [f"{s} - ${c:.2f} - الحجم: {int(v):,}" for s, c, v in results[:10]]
 
 # أمر /scan
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_IDS:
         await update.message.reply_text("🚫 غير مصرح لك.")
         return
-    await update.message.reply_text("🔍 يتم الآن فحص الأسهم...")
+    await update.message.reply_text("🔍 جاري فحص السوق...")
     report = scan_stocks()
     await update.message.reply_text("\n".join(report))
 
-# التقرير اليومي التلقائي
-async def send_daily_report(app):
+# إرسال التقرير اليومي
+async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     report = scan_stocks()
     for user_id in ALLOWED_IDS:
         try:
-            await app.bot.send_message(chat_id=user_id, text="📊 التقرير اليومي:\n" + "\n".join(report))
+            await context.bot.send_message(chat_id=user_id, text="📊 التقرير اليومي:\n" + "\n".join(report))
         except Exception as e:
             logger.error(f"فشل إرسال التقرير إلى {user_id}: {e}")
 
-# الدالة الرئيسية
-async def run_bot():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("scan", scan_command))
-
-    # جدولة التقرير اليومي الساعة 3 مساءً بتوقيت السعودية
+# post_init لتشغيل الجدولة بعد بدء البوت
+async def setup_scheduler(app):
     scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Riyadh"))
-    scheduler.add_job(send_daily_report, trigger="cron", hour=15, minute=0, args=[app])
+    scheduler.add_job(send_daily_report, trigger="cron", hour=15, minute=0, args=[app.bot])
     scheduler.start()
 
-    await app.run_polling()
-
-# تشغيل البوت
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(run_bot())
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(setup_scheduler).build()
+    app.add_handler(CommandHandler("scan", scan_command))
+    app.run_polling()
