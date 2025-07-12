@@ -92,4 +92,13 @@ async def main():
 # ✅ هذا هو السطر الصحيح لتشغيل البرنامج على Render:
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    import sys
+
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.close()
