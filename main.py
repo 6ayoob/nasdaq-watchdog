@@ -9,7 +9,7 @@ import pandas as pd
 
 TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
 ALLOWED_USERS = [7863509137]
-REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
+REPORT_TIME_HOUR = 15  # 3 مساءً بتوقيت السعودية
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,6 +58,43 @@ def scan_stocks():
     return "\n\n".join(good_stocks[:10])
 
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا الأمر.")
+        return
+    await update.message.reply_text("🔍 جارٍ فحص السوق...")
+    result = await asyncio.to_thread(scan_stocks)
+    await update.message.reply_text(result)
+
+async def daily_report(app):
+    while True:
+        now = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
+        next_run = now.replace(hour=REPORT_TIME_HOUR, minute=0, second=0, microsecond=0)
+        if next_run < now:
+            next_run += datetime.timedelta(days=1)
+        wait_seconds = (next_run - now).total_seconds()
+        await asyncio.sleep(wait_seconds)
+
+        result = await asyncio.to_thread(scan_stocks)
+        for user_id in ALLOWED_USERS:
+            try:
+                await app.bot.send_message(chat_id=user_id, text="📊 التقرير اليومي:\n\n" + result)
+            except Exception as e:
+                logger.error(f"فشل إرسال التقرير إلى {user_id}: {e}")
+
+if __name__ == "__main__":
+    async def main():
+        app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("scan", scan_command))
+
+        # تشغيل مهمة التقرير اليومي في الخلفية
+        asyncio.create_task(daily_report(app))
+
+        await app.run_polling()
+
+    asyncio.run(main())
+
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
         return
