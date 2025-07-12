@@ -8,12 +8,10 @@ import asyncio
 import pandas as pd
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# إعدادات البوت
 TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxYx"
 ALLOWED_USERS = [658712542]
 REPORT_TIME_HOUR = 15  # 3 مساءً بتوقيت السعودية
 
-# اللوق
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -39,11 +37,9 @@ def scan_stocks():
             df = ticker.history(period="3mo")
             if df.empty or len(df) < 50:
                 continue
-
             df["50ma"] = df["Close"].rolling(window=50).mean()
             df["50vol"] = df["Volume"].rolling(window=50).mean()
             latest = df.iloc[-1]
-
             if (
                 latest["Close"] < 20 and
                 latest["Close"] > latest["50ma"] and
@@ -77,7 +73,6 @@ async def send_daily_report(app):
 
 async def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("scan", scan_command))
 
@@ -94,5 +89,7 @@ async def main():
 
     await app.run_polling()
 
+# ✅ هذا هو السطر الصحيح لتشغيل البرنامج على Render:
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
