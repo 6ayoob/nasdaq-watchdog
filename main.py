@@ -8,7 +8,7 @@ import pandas as pd
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
-ALLOWED_USERS = [658712542]
+ALLOWED_USERS = [7863509137, 658712542]
 REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
 
 logging.basicConfig(level=logging.INFO)
