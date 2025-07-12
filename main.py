@@ -59,14 +59,53 @@ def scan_stocks():
         return "❌ لم يتم العثور على أسهم مطابقة للشروط."
     return "\n\n".join(good_stocks[:20])  # عرض 20 سهم بدل 10
 
-async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_allowed(update.effective_user.id):
-        await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
-        return
+def scan_stocks():
+    import yfinance as yf
+    import pandas as pd
 
-    await update.message.reply_text("🔍 جاري فحص السوق...")
-    result = await asyncio.to_thread(scan_stocks)
-    await update.message.reply_text(result)
+    symbols = load_symbols()
+    if not symbols:
+        return "⚠️ لم يتم العثور على رموز أسهم."
+
+    try:
+        # تحميل البيانات دفعة واحدة لجميع الرموز
+        df = yf.download(
+            tickers=symbols,
+            period="3mo",
+            interval="1d",
+            group_by="ticker",
+            threads=True,
+            auto_adjust=True,
+            progress=False
+        )
+    except Exception as e:
+        return f"❌ حدث خطأ أثناء تحميل البيانات: {e}"
+
+    good_stocks = []
+
+    for symbol in symbols:
+        try:
+            data = df[symbol]
+            if data.empty or len(data) < 50:
+                continue
+
+            data["50ma"] = data["Close"].rolling(window=50).mean()
+            data["50vol"] = data["Volume"].rolling(window=50).mean()
+            latest = data.iloc[-1]
+
+            if (
+                latest["Close"] < 20 and
+                latest["Close"] > latest["50ma"] and
+                latest["Volume"] > latest["50vol"]
+            ):
+                good_stocks.append(f"📈 {symbol}\nالسعر: ${latest['Close']:.2f}")
+
+        except Exception:
+            continue
+
+    if not good_stocks:
+        return "❌ لم يتم العثور على أسهم مطابقة للشروط."
+    return "\n\n".join(good_stocks[:20])  # يمكنك تعديل العدد هنا
 
 # ✅ مهمة التقرير اليومي التلقائي
 async def daily_report(app):
