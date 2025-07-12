@@ -5,34 +5,28 @@ import yfinance as yf
 import datetime
 import pytz
 import pandas as pd
-import asyncio
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# بيانات البوت
-TELEGRAM_BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
-ALLOWED_USERS = [7863509137, 658712542]
+TELEGRAM_BOT_TOKEN = "توكن البوت هنا"
+ALLOWED_USERS = [7863509137]  # معرفك هنا
 REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
 
-# إعداد السجل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# تحميل قائمة الرموز من الملف
 def load_symbols():
     with open("nasdaq_symbols.txt", "r") as f:
-        return [line.strip().upper() for line in f if line.strip()]
+        return [line.strip().upper() for line in f.readlines() if line.strip()]
 
-# التحقق من المستخدم
 def is_allowed(user_id):
     return user_id in ALLOWED_USERS
 
-# أمر /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
         return
     await update.message.reply_text("✅ أهلاً بك! أرسل /scan للحصول على أفضل الأسهم.")
 
-# الفحص
 def scan_stocks():
     symbols = load_symbols()
     good_stocks = []
@@ -55,6 +49,7 @@ def scan_stocks():
             ):
                 name = ticker.info.get("shortName", symbol)
                 good_stocks.append(f"📈 {name} ({symbol})\nالسعر: ${latest['Close']:.2f}")
+
         except Exception:
             continue
 
@@ -62,42 +57,39 @@ def scan_stocks():
         return "❌ لم يتم العثور على أسهم مطابقة للشروط."
     return "\n\n".join(good_stocks[:10])
 
-# أمر /scan
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
         return
-    await update.message.reply_text("🔍 يتم الآن فحص السوق، الرجاء الانتظار...")
-    result = await asyncio.to_thread(scan_stocks)
+
+    await update.message.reply_text("🔎 يتم فحص السوق الآن، يرجى الانتظار...")
+    result = scan_stocks()
     await update.message.reply_text(result)
 
-# المهمة المجدولة للتقرير اليومي
 async def scheduled_report(app):
-    while True:
-        now = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
-        if now.hour == REPORT_TIME_HOUR and now.minute == 0:
-            result = await asyncio.to_thread(scan_stocks)
-            for user_id in ALLOWED_USERS:
-                try:
-                    await app.bot.send_message(chat_id=user_id, text=result)
-                except Exception as e:
-                    logger.error(f"خطأ عند إرسال التقرير إلى {user_id}: {e}")
-            await asyncio.sleep(60)  # انتظر دقيقة حتى لا تتكرر الإرسال
-        await asyncio.sleep(30)
+    now = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
+    if now.hour == REPORT_TIME_HOUR:
+        result = scan_stocks()
+        for user_id in ALLOWED_USERS:
+            try:
+                await app.bot.send_message(chat_id=user_id, text=result)
+            except Exception as e:
+                logger.error(f"❌ فشل إرسال التقرير إلى المستخدم {user_id}: {e}")
 
-# بدء التطبيق
-async def main():
+def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # أوامر البوت
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("scan", scan_command))
-    asyncio.create_task(scheduled_report(app))
-    await app.run_polling()
 
-# معالجة مشكلة event loop في Render
+    # مجدول التقارير اليومية
+    scheduler = AsyncIOScheduler(timezone="Asia/Riyadh")
+    scheduler.add_job(scheduled_report, "cron", hour=REPORT_TIME_HOUR, args=[app])
+    scheduler.start()
+
+    # تشغيل البوت
+    app.run_polling()
+
 if __name__ == "__main__":
-    try:
-        asyncio.get_event_loop().run_until_complete(main())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(main())
+    main()
