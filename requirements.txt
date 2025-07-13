@@ -2,3 +2,4 @@ python-telegram-bot==20.3
 yfinance
 apscheduler
 pytz
+python-3.11.8
