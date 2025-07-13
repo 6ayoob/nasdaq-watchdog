@@ -1,102 +1,72 @@
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 import yfinance as yf
-import datetime
 import pytz
-import asyncio
-import pandas as pd
 
-# إعدادات البوت
 BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
-ALLOWED_IDS = [7863509137, 658712542]
-REPORT_TIME_HOUR = 15  # الساعة 3 مساءً بتوقيت السعودية
+ALLOWED_IDS = [7863509137]
 
-# إعدادات اللوق
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+ksa_tz = pytz.timezone("Asia/Riyadh")
 
-# تحميل قائمة الأسهم من ملف
 def load_symbols():
-    with open("symbols.txt", "r") as f:
-        return [line.strip().upper() for line in f.readlines() if line.strip()]
+    try:
+        with open("nasdaq_symbols.txt", "r") as f:
+            return [line.strip() for line in f if line.strip()]
+    except FileNotFoundError:
+        return []
 
-# التحقق من المستخدم
-def is_allowed(user_id):
-    return user_id in ALLOWED_USERS
+def passes_conditions(stock):
+    try:
+        info = stock.info
+        price = info.get("regularMarketPrice")
+        fifty_ma = info.get("fiftyDayAverage")
+        volume = info.get("volume")
+        avg_volume = info.get("averageVolume")
+        return (
+            price is not None and price < 20 and
+            fifty_ma is not None and price > fifty_ma and
+            avg_volume is not None and volume is not None and volume > avg_volume
+        )
+    except Exception:
+        return False
 
-# أمر /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_allowed(update.effective_user.id):
-        await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
-        return
-    await update.message.reply_text("✅ أهلاً بك! أرسل /scan للحصول على أفضل الأسهم.")
-
-# فحص الأسهم
-def scan_stocks():
+def generate_report():
     symbols = load_symbols()
-    good_stocks = []
-
+    matched = []
     for symbol in symbols:
-        try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(period="3mo")
-            if df.empty or len(df) < 50:
-                continue
+        stock = yf.Ticker(symbol)
+        if passes_conditions(stock):
+            matched.append(symbol)
+    if matched:
+        return "الأسهم المطابقة للشروط:\n" + "\n".join(matched[:10])
+    else:
+        return "❌ لا توجد أسهم مطابقة حالياً."
 
-            df["50ma"] = df["Close"].rolling(window=50).mean()
-            df["50vol"] = df["Volume"].rolling(window=50).mean()
-            latest = df.iloc[-1]
-
-            if (
-                latest["Close"] < 20 and
-                latest["Close"] > latest["50ma"] and
-                latest["Volume"] > latest["50vol"]
-            ):
-                name = ticker.info.get("shortName", symbol)
-                good_stocks.append(f"📈 {name} ({symbol})\nالسعر: ${latest['Close']:.2f}")
-
-        except Exception:
-            continue
-
-    if not good_stocks:
-        return "❌ لم يتم العثور على أسهم مطابقة للشروط."
-    return "\n\n".join(good_stocks[:10])  # نرسل أول 10 فقط
-
-# أمر /scan
-async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_allowed(update.effective_user.id):
-        await update.message.reply_text("🚫 غير مصرح لك باستخدام هذا البوت.")
+async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_IDS:
         return
+    await update.message.reply_text("🔍 جاري الفحص...")
+    report = generate_report()
+    await update.message.reply_text(report)
 
-    await update.message.reply_text("🔍 جاري فحص السوق...")
-    result = await asyncio.to_thread(scan_stocks)
-    await update.message.reply_text(result)
+async def daily_job(app):
+    report = generate_report()
+    for user_id in ALLOWED_IDS:
+        try:
+            await app.bot.send_message(chat_id=user_id, text=f"📈 التقرير اليومي:\n{report}")
+        except Exception as e:
+            logging.error(f"فشل الإرسال إلى {user_id}: {e}")
 
-# إرسال التقرير اليومي التلقائي
-async def daily_report(app):
-    while True:
-        now = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
-        if now.hour == REPORT_TIME_HOUR and now.minute == 0:
-            result = await asyncio.to_thread(scan_stocks)
-            for user_id in ALLOWED_USERS:
-                try:
-                    await app.bot.send_message(chat_id=user_id, text="📊 تقرير السوق اليومي:\n\n" + result)
-                except Exception as e:
-                    logger.error(f"فشل في إرسال التقرير إلى {user_id}: {e}")
-            await asyncio.sleep(60)
-        await asyncio.sleep(30)
-
-# تشغيل البوت
-async def main():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("scan", scan_command))
-
-    app.create_task(daily_report(app))
-
-    await app.run_polling()
+def setup_scheduler(app):
+    scheduler = AsyncIOScheduler(timezone=ksa_tz)
+    scheduler.add_job(lambda: daily_job(app), CronTrigger(hour=15, minute=0))
+    scheduler.start()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(setup_scheduler).build()
+    app.add_handler(CommandHandler("scan", scan))
+    app.run_polling()
