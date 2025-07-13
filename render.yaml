@@ -1,7 +1,9 @@
 services:
   - type: web
-    name: nasdaq-watchdog
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    name: nasdaq-watchdog-1
+    env: python
     plan: free
+    buildCommand: ""
+    startCommand: "python main.py"
+    autoDeploy: true
+    envVars: []
