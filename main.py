@@ -1,71 +1,81 @@
+
 import logging
-import yfinance as yf
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import datetime
+from apscheduler.triggers.cron import CronTrigger
+import yfinance as yf
+from datetime import datetime
 import pytz
 
-# ✅ التوكن والمعرفات
 BOT_TOKEN = "7863509137:AAHBuRbtzMAOM_yBbVZASfx-oORubvQYxY8"
 ALLOWED_IDS = [7863509137]
 
-# ✅ إعداد السجلات
-logging.basicConfig(level=logging.INFO)
+# إعداد المنطقة الزمنية
+ksa_tz = pytz.timezone("Asia/Riyadh")
 
-# ✅ دالة فحص الأسهم
-def scan_stocks():
+# تحميل الرموز من ملف خارجي
+def load_symbols():
     try:
-        with open("nasdaq_symbols.txt") as f:
-            symbols = f.read().splitlines()
+        with open("nasdaq_symbols.txt", "r") as f:
+            return [line.strip() for line in f if line.strip()]
     except FileNotFoundError:
-        return ["⚠️ ملف الأسهم غير موجود"]
+        return []
 
-    results = []
-    for symbol in symbols[:200]:  # يمكنك زيادة العدد حسب الحاجة
-        try:
-            stock = yf.Ticker(symbol)
-            hist = stock.history(period="60d")
+# شروط الفلترة للأسهم
+def passes_conditions(stock):
+    try:
+        info = stock.info
+        price = info.get("regularMarketPrice")
+        fifty_ma = info.get("fiftyDayAverage")
+        volume = info.get("volume")
+        avg_volume = info.get("averageVolume")
+        return (
+            price is not None and price < 20 and
+            fifty_ma is not None and price > fifty_ma and
+            avg_volume is not None and volume is not None and volume > avg_volume
+        )
+    except Exception:
+        return False
 
-            if len(hist) < 50:
-                continue
+# إنشاء تقرير بالأسهم المطابقة
+def generate_report():
+    symbols = load_symbols()
+    matched = []
+    for symbol in symbols:
+        stock = yf.Ticker(symbol)
+        if passes_conditions(stock):
+            matched.append(symbol)
+    if matched:
+        return "الأسهم المطابقة للشروط:\n" + "\n".join(matched[:10])
+    else:
+        return "لا توجد أسهم مطابقة للشروط حالياً."
 
-            price = hist['Close'][-1]
-            avg_volume = hist['Volume'][-50:].mean()
-            volume = hist['Volume'][-1]
-            ma50 = hist['Close'][-50:].mean()
-
-            if price < 20 and price > ma50 and volume > avg_volume:
-                results.append(f"{symbol}: ${price:.2f}")
-        except Exception:
-            continue
-
-    return results or ["❌ لا توجد أسهم مطابقة"]
-
-# ✅ أمر /scan
-async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# أمر /scan من المستخدم
+async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_IDS:
         return
-    await update.message.reply_text("🔍 يتم الفحص الآن...")
-    results = scan_stocks()
-    await update.message.reply_text("\n".join(results))
+    await update.message.reply_text("جاري فحص الأسهم...")
+    report = generate_report()
+    await update.message.reply_text(report)
 
-# ✅ التقرير اليومي التلقائي
-async def daily_report(context: ContextTypes.DEFAULT_TYPE):
-    results = scan_stocks()
-    await context.bot.send_message(chat_id=ALLOWED_IDS[0], text="📊 تقرير يومي:\n" + "\n".join(results))
+# مهمة مجدولة للتقرير اليومي
+async def daily_job(app):
+    r = generate_report()
+    for user_id in ALLOWED_IDS:
+        try:
+            await app.bot.send_message(chat_id=user_id, text=f"📈 التقرير اليومي:\n{r}")
+        except Exception as e:
+            logging.error(f"فشل الإرسال إلى {user_id}: {e}")
 
-# ✅ تشغيل التطبيق
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+# جدولة المهام اليومية
+def setup_scheduler(app):
+    scheduler = AsyncIOScheduler(timezone=ksa_tz)
+    scheduler.add_job(lambda: daily_job(app), CronTrigger(hour=15, minute=0))
+    scheduler.start()
 
-# ✅ أوامر البوت
-app.add_handler(CommandHandler("scan", scan_command))
-
-# ✅ جدولة التقرير التلقائي الساعة 3 مساءً بتوقيت السعودية
-scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Riyadh"))
-scheduler.add_job(daily_report, "cron", hour=15, minute=0)
-scheduler.start()
-
-# ✅ تشغيل البوت
-print("✅ Bot is running...")
-app.run_polling()
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(setup_scheduler).build()
+    app.add_handler(CommandHandler("scan", scan))
+    app.run_polling()
